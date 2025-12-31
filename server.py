@@ -1,5 +1,4 @@
 from fastapi import FastAPI, APIRouter, HTTPException
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List
@@ -9,27 +8,32 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import os
 import logging
-from pathlib import Path
 
-# ================== SETUP ==================
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+# ================== FIREBASE INITIALIZATION (RENDER SAFE) ==================
 
-# Initialize Firebase only once
+firebase_config = {
+    "type": "service_account",
+    "project_id": os.environ["FIREBASE_PROJECT_ID"],
+    "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace("\\n", "\n"),
+    "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
+    "token_uri": "https://oauth2.googleapis.com/token",
+}
+
+cred = credentials.Certificate(firebase_config)
+
 if not firebase_admin._apps:
-    cred = credentials.Certificate(ROOT_DIR / os.environ["FIREBASE_CREDENTIALS"])
     firebase_admin.initialize_app(cred)
 
 # Firestore client
 db = firestore.client()
 
 # ================== FASTAPI APP ==================
+
 app = FastAPI(title="FastAPI + Firebase API", version="1.0")
 api_router = APIRouter(prefix="/api")
 
 # ================== MODELS ==================
 
-# ----- STORY MODELS -----
 class Story(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -46,7 +50,6 @@ class StoryCreate(BaseModel):
     story: str
 
 
-# ----- CONTACT MODELS (NEW) -----
 class ContactMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -66,10 +69,10 @@ class ContactMessageCreate(BaseModel):
 
 @api_router.get("/")
 async def root():
-    return {"message": "Hello from Firebase-backed FastAPI!"}
+    return {"status": "Backend running 🚀"}
 
 
-# ===== STORIES APIs =====
+# ===== STORIES =====
 
 @api_router.post("/stories", response_model=Story)
 async def create_story(input: StoryCreate):
@@ -104,7 +107,7 @@ async def get_stories():
         raise HTTPException(status_code=500, detail="Failed to fetch stories")
 
 
-# ===== CONTACT FORM API (NEW) =====
+# ===== CONTACT =====
 
 @api_router.post("/contact", response_model=ContactMessage)
 async def save_contact_message(input: ContactMessageCreate):
@@ -121,7 +124,7 @@ async def save_contact_message(input: ContactMessageCreate):
         raise HTTPException(status_code=500, detail="Failed to send message")
 
 
-# ================== MIDDLEWARE ==================
+# ================== CORS ==================
 
 app.add_middleware(
     CORSMiddleware,
@@ -132,16 +135,18 @@ app.add_middleware(
 )
 
 # ================== LOGGING ==================
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger(__name__)
 
-# ================== INCLUDE ROUTER ==================
+# ================== ROUTER ==================
+
 app.include_router(api_router)
 
 # ================== SHUTDOWN ==================
+
 @app.on_event("shutdown")
 async def shutdown_event():
     logging.info("Shutting down FastAPI app gracefully.")
